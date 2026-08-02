@@ -319,18 +319,36 @@ pub unsafe extern "C" fn SQLAllocHandle(
     output_handle: *mut *mut c_void,
 ) -> c_int {
     unsafe {
+        if output_handle.is_null() {
+            return SQL_ERROR;
+        }
         match handle_type {
             SQL_HANDLE_ENV => {
                 *output_handle = std::ptr::dangling_mut::<c_void>();
                 SQL_SUCCESS
             }
             SQL_HANDLE_DBC => {
+                if input_handle.is_null() {
+                    return SQL_ERROR;
+                }
                 let id = slot_alloc(&DBC_STORE, SqlDbcEntry { source: None });
                 *output_handle = (id + 1) as *mut c_void;
                 SQL_SUCCESS
             }
             SQL_HANDLE_STMT => {
+                if input_handle.is_null() {
+                    return SQL_ERROR;
+                }
                 let dbc_id = (input_handle as usize).saturating_sub(1);
+                let valid_dbc = DBC_STORE
+                    .lock()
+                    .unwrap()
+                    .get(dbc_id)
+                    .and_then(|entry| entry.as_ref())
+                    .is_some();
+                if !valid_dbc {
+                    return SQL_ERROR;
+                }
                 let entry = SqlStmtEntry {
                     dbc_id,
                     results: Vec::new(),

@@ -790,7 +790,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some("lte") => QueryOp::lte(key, parse_value(&value)),
                 Some("contains") => QueryOp::contains(key, value),
                 Some(other) => return Err(format!("Unsupported query operator: {}", other).into()),
-                _ => QueryOp::eq(key, value),
+                _ => QueryOp::eq(key, parse_value(&value)),
             };
             let results = db.query(&query_op);
             if results.is_empty() {

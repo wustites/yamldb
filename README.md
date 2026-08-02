@@ -15,7 +15,7 @@ A lightweight YAML file-based database with CLI tool, Rust API, ODBC driver, and
 - **Query Builder** - Flexible conditions with AND/OR/NOT
 - **Fuzzy Search** - Case-insensitive keyword search
 - **Import/Export** - JSON and YAML formats
-- **Backup/Restore** - Database snapshots
+- **Backup** - YAML database snapshots
 - **CLI Tool** - Command-line interface
 - **ODBC Driver** - SQL query support
 - **JDBC Driver** - Java SQL access support
@@ -95,6 +95,12 @@ SELECT * FROM users
 
 When creating data through CLI or Web UI, a missing table in a directory source is created as `<table>.yaml`.
 
+### Persistence Guarantees
+
+File-backed mutations are committed to memory only after the updated YAML has been written successfully. YamlDB writes a synchronized temporary file in the destination directory and atomically replaces the database file, so an I/O or `yq` failure leaves both the previously saved file and the in-memory database state unchanged.
+
+This protects an individual YamlDB write from partial replacement. It does not provide locking or transactions between multiple processes; applications must coordinate concurrent writers.
+
 ### Capability Matrix
 
 | Surface | Single file | Directory tables | Write support | Table metadata |
@@ -155,6 +161,8 @@ yamldb query --key name --value Ali --op contains
 yamldb search --keyword alice
 yamldb search --keyword alice --key name
 ```
+
+Equality and comparison values are parsed as YAML scalar types. For example, `--value 30` matches a numeric `age: 30`, while `--value true` matches a boolean value. The CLI does not currently provide a type override for numeric-looking or boolean-looking strings; use the Rust API when an exact string comparison is required for those values.
 
 ### Import & Export
 
@@ -689,7 +697,8 @@ yamldb/
 │   ├── main.rs     # CLI tool
 │   └── odbc.rs     # ODBC driver
 ├── tests/
-│   ├── integration.rs  # Unit tests
+│   ├── cli.rs          # CLI integration tests
+│   ├── integration.rs  # Rust API integration tests
 │   └── odbc.rs         # ODBC tests
 ├── jdbc/
 │   ├── src/main/java   # JDBC driver

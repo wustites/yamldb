@@ -391,6 +391,19 @@ mod tests {
     }
 
     #[test]
+    fn test_failed_save_does_not_change_memory_state() {
+        let parent = temp_path("not-a-directory");
+        std::fs::write(&parent, "file").unwrap();
+        let mut db = YamlDb::new(parent.join("data.yaml"));
+
+        assert!(db.create(Record::new("user1")).is_err());
+        assert!(!db.exists("user1"));
+        assert_eq!(db.count(), 0);
+
+        let _ = std::fs::remove_file(parent);
+    }
+
+    #[test]
     fn test_not_found_error() {
         let db = YamlDb::memory();
         assert!(db.read("nonexistent").is_err());

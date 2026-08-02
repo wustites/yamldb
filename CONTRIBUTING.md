@@ -13,6 +13,8 @@ Thank you for your interest in contributing to YamlDB!
 
 ## Development Setup
 
+Rust tests require `yq` v4 on `PATH`, or a valid `YAMLDB_YQ` path. JDBC development additionally requires JDK 17 or newer.
+
 ```bash
 # Clone the repo
 git clone https://github.com/your-username/yamldb.git
@@ -21,11 +23,23 @@ cd yamldb
 # Build
 cargo build
 
-# Run tests
-cargo test
+# Run all Rust tests and examples
+cargo test --all-targets
 
 # Run clippy
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
+
+# Check formatting
+cargo fmt --all -- --check
+
+# Build and test JDBC (Linux/macOS)
+bash jdbc/build.sh
+```
+
+On Windows, build and test JDBC with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File jdbc\build.ps1
 ```
 
 ## Code Style

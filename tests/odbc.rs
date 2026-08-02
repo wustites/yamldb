@@ -248,6 +248,17 @@ fn test_odbc_driver() {
     // Test 6: Invalid handles
     unsafe {
         assert_eq!(
+            SQLAllocHandle(SQL_HANDLE_ENV, ptr::null_mut(), ptr::null_mut()),
+            SQL_ERROR,
+            "null output handle"
+        );
+        let mut invalid_stmt: *mut c_void = ptr::null_mut();
+        assert_eq!(
+            SQLAllocHandle(SQL_HANDLE_STMT, ptr::null_mut(), &mut invalid_stmt),
+            SQL_ERROR,
+            "null parent handle"
+        );
+        assert_eq!(
             SQLConnect(
                 ptr::null_mut(),
                 ptr::null(),

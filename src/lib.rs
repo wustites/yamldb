@@ -349,13 +349,15 @@ impl YamlDb {
         if self.records.contains_key(&record.id) {
             return Err(YamlDbError::DuplicateKey(record.id));
         }
-        self.records.insert(record.id.clone(), record);
-        self.save()
+        let mut records = self.records.clone();
+        records.insert(record.id.clone(), record);
+        self.commit_records(records)
     }
 
     pub fn insert(&mut self, record: Record) -> Result<(), YamlDbError> {
-        self.records.insert(record.id.clone(), record);
-        self.save()
+        let mut records = self.records.clone();
+        records.insert(record.id.clone(), record);
+        self.commit_records(records)
     }
 
     pub fn read(&self, id: &str) -> Result<&Record, YamlDbError> {
@@ -377,12 +379,12 @@ impl YamlDb {
         id: &str,
         data: HashMap<String, serde_yaml::Value>,
     ) -> Result<(), YamlDbError> {
-        let record = self
-            .records
+        let mut records = self.records.clone();
+        let record = records
             .get_mut(id)
             .ok_or_else(|| YamlDbError::NotFound(id.to_string()))?;
         record.data = data;
-        self.save()
+        self.commit_records(records)
     }
 
     pub fn update_field(
@@ -391,47 +393,50 @@ impl YamlDb {
         key: &str,
         value: serde_yaml::Value,
     ) -> Result<(), YamlDbError> {
-        let record = self
-            .records
+        let mut records = self.records.clone();
+        let record = records
             .get_mut(id)
             .ok_or_else(|| YamlDbError::NotFound(id.to_string()))?;
         record.data.insert(key.to_string(), value);
-        self.save()
+        self.commit_records(records)
     }
 
     pub fn update_many(
         &mut self,
         updates: Vec<(String, HashMap<String, serde_yaml::Value>)>,
     ) -> Result<usize, YamlDbError> {
+        let mut records = self.records.clone();
         let mut count = 0;
         for (id, data) in updates {
-            if let Some(record) = self.records.get_mut(&id) {
+            if let Some(record) = records.get_mut(&id) {
                 record.data = data;
                 count += 1;
             }
         }
         if count > 0 {
-            self.save()?;
+            self.commit_records(records)?;
         }
         Ok(count)
     }
 
     pub fn delete(&mut self, id: &str) -> Result<(), YamlDbError> {
-        self.records
+        let mut records = self.records.clone();
+        records
             .remove(id)
             .ok_or_else(|| YamlDbError::NotFound(id.to_string()))?;
-        self.save()
+        self.commit_records(records)
     }
 
     pub fn delete_many(&mut self, ids: &[&str]) -> Result<usize, YamlDbError> {
+        let mut records = self.records.clone();
         let mut count = 0;
         for id in ids {
-            if self.records.remove(*id).is_some() {
+            if records.remove(*id).is_some() {
                 count += 1;
             }
         }
         if count > 0 {
-            self.save()?;
+            self.commit_records(records)?;
         }
         Ok(count)
     }
@@ -499,13 +504,13 @@ impl YamlDb {
     }
 
     pub fn clear(&mut self) -> Result<(), YamlDbError> {
-        self.records.clear();
-        self.save()
+        self.commit_records(HashMap::new())
     }
 
     pub fn upsert(&mut self, record: Record) -> Result<(), YamlDbError> {
-        self.records.insert(record.id.clone(), record);
-        self.save()
+        let mut records = self.records.clone();
+        records.insert(record.id.clone(), record);
+        self.commit_records(records)
     }
 
     pub fn stats(&self) -> DbStats {
@@ -540,6 +545,7 @@ impl YamlDb {
     pub fn import_json(&mut self, path: &Path) -> Result<usize, YamlDbError> {
         let content = fs::read_to_string(path)?;
         let items: Vec<serde_json::Value> = serde_json::from_str(&content)?;
+        let mut records = self.records.clone();
         let mut count = 0;
         for item in items {
             if let Some(obj) = item.as_object() {
@@ -557,21 +563,22 @@ impl YamlDb {
                         (k.clone(), yaml_val)
                     })
                     .collect();
-                self.records.insert(id.clone(), Record { id, data });
+                records.insert(id.clone(), Record { id, data });
                 count += 1;
             }
         }
-        self.save()?;
+        self.commit_records(records)?;
         Ok(count)
     }
 
     pub fn import_yaml(&mut self, path: &Path) -> Result<usize, YamlDbError> {
-        let records = read_records_with_yq(path)?;
-        let count = records.len();
-        for record in records {
-            self.records.insert(record.id.clone(), record);
+        let imported = read_records_with_yq(path)?;
+        let count = imported.len();
+        let mut records = self.records.clone();
+        for record in imported {
+            records.insert(record.id.clone(), record);
         }
-        self.save()?;
+        self.commit_records(records)?;
         Ok(count)
     }
 
@@ -597,6 +604,17 @@ impl YamlDb {
         let records = self.sorted_records();
         let content = write_records_with_yq(&records)?;
         write_file_atomically(path, content.as_bytes())?;
+        Ok(())
+    }
+
+    fn commit_records(&mut self, records: HashMap<String, Record>) -> Result<(), YamlDbError> {
+        if let Some(path) = &self.path {
+            let mut sorted: Vec<&Record> = records.values().collect();
+            sorted.sort_by(|a, b| a.id.cmp(&b.id));
+            let content = write_records_with_yq(&sorted)?;
+            write_file_atomically(path, content.as_bytes())?;
+        }
+        self.records = records;
         Ok(())
     }
 }
@@ -691,27 +709,73 @@ fn command_stderr(stderr: Vec<u8>) -> String {
 }
 
 fn write_file_atomically(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
 
-    let tmp_path = path.with_extension(format!(
-        "{}tmp",
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| format!("{ext}."))
-            .unwrap_or_default()
+    let suffix = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("yamldb");
+    let tmp_path = path.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        suffix
     ));
 
-    {
+    let result = (|| {
         let mut file = fs::File::create(&tmp_path)?;
         file.write_all(content)?;
         file.sync_all()?;
-    }
 
-    if path.exists() {
-        fs::remove_file(path)?;
+        replace_file(&tmp_path, path)?;
+
+        #[cfg(unix)]
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
     }
-    fs::rename(tmp_path, path)?;
-    Ok(())
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }

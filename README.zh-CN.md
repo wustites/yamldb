@@ -95,6 +95,12 @@ SELECT * FROM users
 
 通过 CLI 或 Web UI 写入目录数据源时，如果表不存在，会创建为 `<table>.yaml`。
 
+### 持久化保证
+
+对于文件数据库，只有更新后的 YAML 成功写入后，修改才会提交到内存状态。YamlDB 会在目标目录写入并同步临时文件，然后原子替换数据库文件；如果发生 I/O 或 `yq` 错误，磁盘上原有文件和内存数据库状态都会保持不变。
+
+该机制可避免单次 YamlDB 写入产生部分替换，但不提供多进程之间的锁或事务。存在多个写入进程时，调用方仍需自行协调。
+
 ### 能力对照
 
 | 入口 | 单文件 | 目录多表 | 写入支持 | 表元数据 |
@@ -155,6 +161,8 @@ yamldb query --key name --value Ali --op contains
 yamldb search --keyword alice
 yamldb search --keyword alice --key name
 ```
+
+等值和比较查询会把参数解析为 YAML 标量类型。例如，`--value 30` 匹配数字 `age: 30`，`--value true` 匹配布尔值。CLI 目前不提供类型覆盖参数；如果需要精确匹配数字或布尔形式的字符串，请使用 Rust API。
 
 ### 导入、导出与备份
 
@@ -649,8 +657,9 @@ yamldb/
 │   ├── main.rs     # CLI 工具
 │   └── odbc.rs     # ODBC 驱动
 ├── tests/
-│   ├── integration.rs
-│   └── odbc.rs
+│   ├── cli.rs          # CLI 集成测试
+│   ├── integration.rs  # Rust API 集成测试
+│   └── odbc.rs         # ODBC 测试
 ├── examples/
 │   └── odbc_usage.rs
 ├── jdbc/

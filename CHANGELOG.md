@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- File-backed mutations now update in-memory state only after persistence succeeds.
+- Database files are replaced atomically without deleting the previous file first, including native replacement handling on Windows.
+- CLI equality queries now parse numeric, floating-point, and boolean values consistently with comparison queries.
+- ODBC handle allocation now rejects null output pointers and invalid parent handles.
+
+### Documentation
+- Documented scalar parsing for CLI queries, persistence guarantees, and concurrent-writer limitations.
+- Corrected the feature list and updated the test layout and contributor verification steps.
+
 ## [0.10.0] - 2026-06-23
 
 ### Added
